@@ -79,17 +79,17 @@
   <div id="lives-display"></div>
 </div>
 
-<div id="start-screen">
+<div id="start-screen" onclick="startGame()">
   <h1>NEON CASCADE</h1>
   <div class="subtitle">Catch the falling neon orbs</div>
-  <button class="btn" id="startBtn">PLAY</button>
+  <button class="btn">PLAY</button>
   <div class="instructions">Tap or drag to move the paddle<br>Catch matching colors for combos<br>Avoid the red glitch orbs!</div>
 </div>
 
-<div id="game-over-screen">
+<div id="game-over-screen" onclick="startGame()">
   <h1 style="font-size:clamp(28px,6vw,48px)">GAME OVER</h1>
   <div id="final-score">0</div>
-  <button class="btn" id="restartBtn">PLAY AGAIN</button>
+  <button class="btn">PLAY AGAIN</button>
 </div>
 
 <script>
@@ -391,24 +391,17 @@ function movePaddle(clientX) {
 
 canvas.addEventListener('mousemove', (e) => { movePaddle(e.clientX); });
 
-// Touch: tap anywhere to start/restart, drag to move paddle during game
+// Paddle control — only intercept touches when the game is running
 document.addEventListener('touchstart', (e) => {
+  if (!gameRunning) return;
   e.preventDefault();
-  if (gameRunning) {
-    movePaddle(e.touches[0].clientX);
-  } else {
-    startGame();
-  }
+  movePaddle(e.touches[0].clientX);
 }, { passive: false });
 
 document.addEventListener('touchmove', (e) => {
   e.preventDefault();
   if (gameRunning) movePaddle(e.touches[0].clientX);
 }, { passive: false });
-
-// Desktop fallback
-document.getElementById('startBtn').addEventListener('click', startGame);
-document.getElementById('restartBtn').addEventListener('click', startGame);
 
 // Init
 initStars();
