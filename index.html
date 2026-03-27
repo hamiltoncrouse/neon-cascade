@@ -169,42 +169,34 @@ function draw() {
   if (gameState === TITLE) {
     const pulse = (Math.sin(Date.now() * 0.003) + 1) * 0.5;
     ctx.textAlign = 'center';
-    ctx.font = 'bold ' + Math.min(56, W * 0.13) + 'px system-ui';
+    ctx.font = 'bold 48px sans-serif';
     ctx.fillStyle = '#0ff';
-    ctx.shadowColor = '#0ff'; ctx.shadowBlur = 30;
     ctx.fillText('NEON CASCADE', W/2, H * 0.35);
-    ctx.shadowBlur = 0;
-    ctx.font = Math.min(18, W * 0.048) + 'px system-ui';
+    ctx.font = '18px sans-serif';
     ctx.fillStyle = '#f0f';
     ctx.fillText('Catch the falling neon orbs', W/2, H * 0.44);
-    ctx.font = 'bold ' + Math.min(26, W * 0.065) + 'px system-ui';
-    ctx.fillStyle = `rgba(0,255,255,${0.5 + pulse * 0.5})`;
-    ctx.shadowColor = '#0ff'; ctx.shadowBlur = 10 + pulse * 20;
+    ctx.font = 'bold 28px sans-serif';
+    ctx.fillStyle = 'rgba(0,255,255,' + (0.5 + pulse * 0.5) + ')';
     ctx.fillText('TAP TO PLAY', W/2, H * 0.58);
-    ctx.shadowBlur = 0;
-    ctx.font = Math.min(13, W * 0.035) + 'px system-ui';
-    ctx.fillStyle = 'rgba(255,255,255,0.4)';
+    ctx.font = '14px sans-serif';
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
     ctx.fillText('Drag to move the paddle', W/2, H * 0.70);
-    ctx.fillText('Avoid the red glitch orbs!', W/2, H * 0.75);
+    ctx.fillText('Avoid the red glitch orbs!', W/2, H * 0.76);
     return;
   }
 
   if (gameState === GAMEOVER) {
     const pulse = (Math.sin(Date.now() * 0.003) + 1) * 0.5;
     ctx.textAlign = 'center';
-    ctx.font = 'bold ' + Math.min(48, W * 0.12) + 'px system-ui';
+    ctx.font = 'bold 44px sans-serif';
     ctx.fillStyle = '#0ff';
-    ctx.shadowColor = '#0ff'; ctx.shadowBlur = 20;
     ctx.fillText('GAME OVER', W/2, H * 0.38);
-    ctx.shadowBlur = 0;
-    ctx.font = 'bold ' + Math.min(26, W * 0.065) + 'px system-ui';
+    ctx.font = 'bold 26px sans-serif';
     ctx.fillStyle = '#fff';
     ctx.fillText('SCORE: ' + score, W/2, H * 0.48);
-    ctx.font = 'bold ' + Math.min(22, W * 0.055) + 'px system-ui';
-    ctx.fillStyle = `rgba(0,255,255,${0.5 + pulse * 0.5})`;
-    ctx.shadowColor = '#0ff'; ctx.shadowBlur = 10 + pulse * 15;
+    ctx.font = 'bold 24px sans-serif';
+    ctx.fillStyle = 'rgba(0,255,255,' + (0.5 + pulse * 0.5) + ')';
     ctx.fillText('TAP TO PLAY AGAIN', W/2, H * 0.60);
-    ctx.shadowBlur = 0;
     return;
   }
 
@@ -274,7 +266,7 @@ function draw() {
   ctx.globalAlpha = 1; ctx.shadowBlur = 0;
 
   // HUD
-  ctx.font = 'bold 20px system-ui';
+  ctx.font = 'bold 20px sans-serif';
   ctx.fillStyle = '#0ff'; ctx.textAlign = 'left';
   ctx.shadowColor = '#0ff'; ctx.shadowBlur = 10;
   ctx.fillText('SCORE: ' + score, 16, 36);
@@ -286,7 +278,7 @@ function draw() {
   ctx.fillText(hearts.trim(), W - 16, 36);
   ctx.shadowBlur = 0;
   if (combo > 1) {
-    ctx.font = 'bold 16px system-ui';
+    ctx.font = 'bold 16px sans-serif';
     ctx.fillStyle = '#f0f'; ctx.textAlign = 'left';
     ctx.shadowColor = '#f0f'; ctx.shadowBlur = 8;
     ctx.fillText('COMBO x' + combo, 16, 60);
