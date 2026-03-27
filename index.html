@@ -391,14 +391,13 @@ function movePaddle(clientX) {
 
 canvas.addEventListener('mousemove', (e) => { movePaddle(e.clientX); });
 
-// Single document-level touch handler for everything
+// Touch: tap anywhere to start/restart, drag to move paddle during game
 document.addEventListener('touchstart', (e) => {
   e.preventDefault();
-  const id = e.target && e.target.id;
-  if (id === 'startBtn' || id === 'restartBtn') {
-    startGame();
-  } else if (gameRunning) {
+  if (gameRunning) {
     movePaddle(e.touches[0].clientX);
+  } else {
+    startGame();
   }
 }, { passive: false });
 
@@ -407,7 +406,7 @@ document.addEventListener('touchmove', (e) => {
   if (gameRunning) movePaddle(e.touches[0].clientX);
 }, { passive: false });
 
-// Fallback click for desktop
+// Desktop fallback
 document.getElementById('startBtn').addEventListener('click', startGame);
 document.getElementById('restartBtn').addEventListener('click', startGame);
 
