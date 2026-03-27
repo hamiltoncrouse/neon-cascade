@@ -391,16 +391,27 @@ function movePaddle(clientX) {
 
 canvas.addEventListener('mousemove', (e) => { movePaddle(e.clientX); });
 
-canvas.addEventListener('touchstart', (e) => {
+// Game touch — document-level so it works regardless of overlapping elements
+document.addEventListener('touchstart', (e) => {
+  if (!gameRunning) return;
   e.preventDefault();
   movePaddle(e.touches[0].clientX);
 }, { passive: false });
-canvas.addEventListener('touchmove', (e) => {
+document.addEventListener('touchmove', (e) => {
+  if (!gameRunning) return;
   e.preventDefault();
   movePaddle(e.touches[0].clientX);
 }, { passive: false });
 
+// Buttons — use touchstart directly so we don't depend on click synthesis
+function handleStart(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  startGame();
+}
+document.getElementById('startBtn').addEventListener('touchstart', handleStart, { passive: false });
 document.getElementById('startBtn').addEventListener('click', startGame);
+document.getElementById('restartBtn').addEventListener('touchstart', handleStart, { passive: false });
 document.getElementById('restartBtn').addEventListener('click', startGame);
 
 // Init
