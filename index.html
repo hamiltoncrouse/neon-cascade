@@ -391,11 +391,11 @@ function movePaddle(clientX) {
 
 canvas.addEventListener('mousemove', (e) => { movePaddle(e.clientX); });
 
-window.addEventListener('touchstart', (e) => {
+canvas.addEventListener('touchstart', (e) => {
   e.preventDefault();
   movePaddle(e.touches[0].clientX);
 }, { passive: false });
-window.addEventListener('touchmove', (e) => {
+canvas.addEventListener('touchmove', (e) => {
   e.preventDefault();
   movePaddle(e.touches[0].clientX);
 }, { passive: false });
