@@ -6,8 +6,8 @@
 <title>Neon Cascade</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  html, body { width: 100%; height: 100%; overflow: hidden; background: #0a0a1a; font-family: 'Segoe UI', system-ui, sans-serif; touch-action: none; }
-  canvas { display: block; width: 100%; height: 100%; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #0a0a1a; font-family: 'Segoe UI', system-ui, sans-serif; }
+  canvas { display: block; width: 100%; height: 100%; touch-action: none; }
 
   #ui-overlay {
     position: absolute; top: 0; left: 0; width: 100%; height: 100%;
@@ -389,19 +389,13 @@ function movePaddle(clientX) {
   paddle.x = Math.max(paddle.w/2, Math.min(W - paddle.w/2, clientX));
 }
 
-canvas.addEventListener('mousemove', (e) => { movePaddle(e.clientX); });
-
-// Paddle control — only intercept touches when the game is running
-document.addEventListener('touchstart', (e) => {
-  if (!gameRunning) return;
-  e.preventDefault();
-  movePaddle(e.touches[0].clientX);
-}, { passive: false });
-
-document.addEventListener('touchmove', (e) => {
-  e.preventDefault();
-  if (gameRunning) movePaddle(e.touches[0].clientX);
-}, { passive: false });
+// Pointer events work for both touch and mouse, no click-synthesis conflicts
+canvas.addEventListener('pointermove', (e) => {
+  if (gameRunning) movePaddle(e.clientX);
+});
+canvas.addEventListener('pointerdown', (e) => {
+  if (gameRunning) movePaddle(e.clientX);
+});
 
 // Init
 initStars();
