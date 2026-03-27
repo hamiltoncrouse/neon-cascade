@@ -6,92 +6,12 @@
 <title>Neon Cascade</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  html, body { width: 100%; height: 100%; overflow: hidden; background: #0a0a1a; font-family: 'Segoe UI', system-ui, sans-serif; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #0a0a1a; }
   canvas { display: block; width: 100%; height: 100%; touch-action: none; }
-
-  #ui-overlay {
-    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-    pointer-events: none; z-index: 10;
-  }
-  #score-display {
-    position: absolute; top: 16px; left: 16px;
-    color: #0ff; font-size: 20px; font-weight: 700;
-    text-shadow: 0 0 10px #0ff, 0 0 20px #0ff;
-  }
-  #combo-display {
-    position: absolute; top: 44px; left: 16px;
-    color: #f0f; font-size: 16px; font-weight: 600;
-    text-shadow: 0 0 8px #f0f;
-    opacity: 0; transition: opacity 0.3s;
-  }
-  #lives-display {
-    position: absolute; top: 16px; right: 16px;
-    color: #f55; font-size: 22px;
-    text-shadow: 0 0 10px #f55;
-  }
-
-  #start-screen, #game-over-screen {
-    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
-    background: rgba(10, 10, 26, 0.92);
-    pointer-events: auto; z-index: 20;
-  }
-  #game-over-screen { display: none; }
-
-  h1 {
-    font-size: clamp(32px, 8vw, 64px); color: #0ff; letter-spacing: 4px;
-    text-shadow: 0 0 20px #0ff, 0 0 40px #0ff, 0 0 80px #08f;
-    margin-bottom: 8px;
-  }
-  .subtitle {
-    color: #f0f; font-size: clamp(14px, 3vw, 20px);
-    text-shadow: 0 0 10px #f0f;
-    margin-bottom: 32px;
-  }
-  .btn {
-    background: transparent; border: 2px solid #0ff; color: #0ff;
-    padding: 14px 48px; font-size: 18px; border-radius: 8px; cursor: pointer;
-    text-shadow: 0 0 8px #0ff;
-    box-shadow: 0 0 15px rgba(0,255,255,0.3), inset 0 0 15px rgba(0,255,255,0.1);
-    transition: all 0.2s; pointer-events: auto;
-  }
-  .btn:hover, .btn:active {
-    background: rgba(0,255,255,0.15);
-    box-shadow: 0 0 30px rgba(0,255,255,0.5), inset 0 0 20px rgba(0,255,255,0.2);
-  }
-  #final-score {
-    color: #0ff; font-size: 28px; margin-bottom: 24px;
-    text-shadow: 0 0 15px #0ff;
-  }
-  .instructions {
-    color: rgba(255,255,255,0.5); font-size: 13px; margin-top: 20px;
-    text-align: center; line-height: 1.6;
-  }
 </style>
 </head>
 <body>
-
 <canvas id="gameCanvas"></canvas>
-
-<div id="ui-overlay">
-  <div id="score-display">SCORE: 0</div>
-  <div id="combo-display"></div>
-  <div id="lives-display"></div>
-</div>
-
-<div id="start-screen" onclick="startGame()">
-  <h1>NEON CASCADE</h1>
-  <div class="subtitle">Catch the falling neon orbs</div>
-  <button class="btn">PLAY</button>
-  <div class="instructions">Tap or drag to move the paddle<br>Catch matching colors for combos<br>Avoid the red glitch orbs!</div>
-</div>
-
-<div id="game-over-screen" onclick="startGame()">
-  <h1 style="font-size:clamp(28px,6vw,48px)">GAME OVER</h1>
-  <div id="final-score">0</div>
-  <button class="btn">PLAY AGAIN</button>
-</div>
-
 <script>
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
@@ -99,33 +19,25 @@ const ctx = canvas.getContext('2d');
 let W, H, dpr;
 function resize() {
   dpr = window.devicePixelRatio || 1;
-  W = window.innerWidth; H = window.innerHeight;
-  canvas.width = W * dpr; canvas.height = H * dpr;
+  W = window.innerWidth;
+  H = window.innerHeight;
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
 resize();
 window.addEventListener('resize', resize);
 
-// Game state
-let gameRunning = false;
+const TITLE = 0, PLAYING = 1, GAMEOVER = 2;
+let gameState = TITLE;
+
 let score = 0, combo = 0, lives = 3;
-let paddle = { x: 0, y: 0, w: 90, h: 16 };
-let orbs = [];
-let particles = [];
-let bgStars = [];
-let spawnTimer = 0;
-let difficulty = 1;
-let lastTime = 0;
+let paddle = { x: 0, y: 0, w: 120, h: 16 };
+let orbs = [], particles = [], bgStars = [];
+let spawnTimer = 0, difficulty = 1, lastTime = 0;
 
-const COLORS = [
-  { h: 180, name: 'cyan',    rgb: '#0ff' },
-  { h: 300, name: 'magenta', rgb: '#f0f' },
-  { h: 120, name: 'green',   rgb: '#0f4' },
-  { h: 60,  name: 'yellow',  rgb: '#ff0' },
-  { h: 270, name: 'purple',  rgb: '#a0f' },
-];
+const COLORS = ['#0ff', '#f0f', '#0f4', '#ff0', '#a0f'];
 
-// Init background stars
 function initStars() {
   bgStars = [];
   for (let i = 0; i < 80; i++) {
@@ -145,36 +57,17 @@ function resetGame() {
   paddle.x = W / 2;
   paddle.y = H - 60;
   paddle.w = Math.min(120, W * 0.28);
-  updateUI();
   initStars();
-}
-
-function updateUI() {
-  document.getElementById('score-display').textContent = 'SCORE: ' + score;
-  const comboEl = document.getElementById('combo-display');
-  if (combo > 1) {
-    comboEl.textContent = 'COMBO x' + combo;
-    comboEl.style.opacity = 1;
-  } else {
-    comboEl.style.opacity = 0;
-  }
-  let hearts = '';
-  for (let i = 0; i < lives; i++) hearts += '♥ ';
-  document.getElementById('lives-display').textContent = hearts;
 }
 
 function spawnOrb() {
   const isGlitch = Math.random() < 0.15 + difficulty * 0.02;
-  const color = isGlitch ? { h: 0, name: 'red', rgb: '#f33' } : COLORS[Math.floor(Math.random() * COLORS.length)];
+  const color = isGlitch ? '#f33' : COLORS[Math.floor(Math.random() * COLORS.length)];
   const r = Math.random() * 10 + 12;
   orbs.push({
-    x: Math.random() * (W - 40) + 20,
-    y: -r,
-    r: r,
+    x: Math.random() * (W - 40) + 20, y: -r, r,
     speed: (Math.random() * 40 + 60) * (1 + difficulty * 0.15),
-    color: color,
-    glitch: isGlitch,
-    glow: 0,
+    color, glitch: isGlitch, glow: 0,
     wobble: Math.random() * Math.PI * 2,
     wobbleSpeed: (Math.random() - 0.5) * 2
   });
@@ -185,30 +78,37 @@ function spawnParticles(x, y, color, count) {
     const angle = Math.random() * Math.PI * 2;
     const speed = Math.random() * 150 + 50;
     particles.push({
-      x, y,
-      vx: Math.cos(angle) * speed,
-      vy: Math.sin(angle) * speed - 50,
-      life: 1,
-      decay: Math.random() * 1.5 + 1,
-      r: Math.random() * 3 + 1,
-      color: color
+      x, y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed - 50,
+      life: 1, decay: Math.random() * 1.5 + 1, r: Math.random() * 3 + 1, color
     });
   }
 }
 
+function movePaddle(clientX) {
+  paddle.x = Math.max(paddle.w / 2, Math.min(W - paddle.w / 2, clientX));
+}
+
+function startGame() {
+  resetGame();
+  gameState = PLAYING;
+}
+
 function update(dt) {
-  if (!gameRunning) return;
+  if (gameState !== PLAYING) {
+    for (const s of bgStars) {
+      s.y += s.speed * dt;
+      if (s.y > H) { s.y = 0; s.x = Math.random() * W; }
+    }
+    return;
+  }
 
   difficulty = 1 + score / 500;
-
-  // Spawn orbs
   spawnTimer -= dt;
   if (spawnTimer <= 0) {
     spawnOrb();
     spawnTimer = Math.max(0.3, 1.2 - difficulty * 0.08);
   }
 
-  // Update orbs
   for (let i = orbs.length - 1; i >= 0; i--) {
     const o = orbs[i];
     o.y += o.speed * dt;
@@ -216,47 +116,34 @@ function update(dt) {
     o.x += Math.sin(o.wobble) * 0.5;
     o.glow = (Math.sin(Date.now() * 0.005) + 1) * 0.5;
 
-    // Check paddle collision
     const dx = o.x - Math.max(paddle.x - paddle.w/2, Math.min(o.x, paddle.x + paddle.w/2));
     const dy = o.y - Math.max(paddle.y - paddle.h/2, Math.min(o.y, paddle.y + paddle.h/2));
-    if (dx * dx + dy * dy < o.r * o.r) {
+    if (dx*dx + dy*dy < o.r*o.r) {
       if (o.glitch) {
-        lives--;
-        combo = 0;
+        lives--; combo = 0;
         spawnParticles(o.x, o.y, '#f33', 15);
-        if (lives <= 0) { endGame(); }
+        if (lives <= 0) gameState = GAMEOVER;
       } else {
         combo++;
-        const points = 10 * combo;
-        score += points;
-        spawnParticles(o.x, o.y, o.color.rgb, 12 + combo * 2);
+        score += 10 * combo;
+        spawnParticles(o.x, o.y, o.color, 12 + combo * 2);
       }
       orbs.splice(i, 1);
-      updateUI();
       continue;
     }
-
-    // Off screen
     if (o.y - o.r > H) {
-      if (!o.glitch) {
-        combo = 0;
-        updateUI();
-      }
+      if (!o.glitch) combo = 0;
       orbs.splice(i, 1);
     }
   }
 
-  // Update particles
   for (let i = particles.length - 1; i >= 0; i--) {
     const p = particles[i];
-    p.x += p.vx * dt;
-    p.y += p.vy * dt;
-    p.vy += 200 * dt;
-    p.life -= p.decay * dt;
+    p.x += p.vx * dt; p.y += p.vy * dt;
+    p.vy += 200 * dt; p.life -= p.decay * dt;
     if (p.life <= 0) particles.splice(i, 1);
   }
 
-  // Update stars
   for (const s of bgStars) {
     s.y += s.speed * dt;
     if (s.y > H) { s.y = 0; s.x = Math.random() * W; }
@@ -264,16 +151,12 @@ function update(dt) {
 }
 
 function draw() {
-  ctx.clearRect(0, 0, W, H);
-
-  // Background gradient
   const bg = ctx.createLinearGradient(0, 0, 0, H);
   bg.addColorStop(0, '#0a0a1a');
   bg.addColorStop(1, '#1a0a2a');
   ctx.fillStyle = bg;
   ctx.fillRect(0, 0, W, H);
 
-  // Stars
   for (const s of bgStars) {
     ctx.globalAlpha = s.alpha;
     ctx.fillStyle = '#fff';
@@ -283,39 +166,73 @@ function draw() {
   }
   ctx.globalAlpha = 1;
 
-  if (!gameRunning) return;
+  if (gameState === TITLE) {
+    const pulse = (Math.sin(Date.now() * 0.003) + 1) * 0.5;
+    ctx.textAlign = 'center';
+    ctx.font = 'bold ' + Math.min(56, W * 0.13) + 'px system-ui';
+    ctx.fillStyle = '#0ff';
+    ctx.shadowColor = '#0ff'; ctx.shadowBlur = 30;
+    ctx.fillText('NEON CASCADE', W/2, H * 0.35);
+    ctx.shadowBlur = 0;
+    ctx.font = Math.min(18, W * 0.048) + 'px system-ui';
+    ctx.fillStyle = '#f0f';
+    ctx.fillText('Catch the falling neon orbs', W/2, H * 0.44);
+    ctx.font = 'bold ' + Math.min(26, W * 0.065) + 'px system-ui';
+    ctx.fillStyle = `rgba(0,255,255,${0.5 + pulse * 0.5})`;
+    ctx.shadowColor = '#0ff'; ctx.shadowBlur = 10 + pulse * 20;
+    ctx.fillText('TAP TO PLAY', W/2, H * 0.58);
+    ctx.shadowBlur = 0;
+    ctx.font = Math.min(13, W * 0.035) + 'px system-ui';
+    ctx.fillStyle = 'rgba(255,255,255,0.4)';
+    ctx.fillText('Drag to move the paddle', W/2, H * 0.70);
+    ctx.fillText('Avoid the red glitch orbs!', W/2, H * 0.75);
+    return;
+  }
 
-  // Draw orbs
+  if (gameState === GAMEOVER) {
+    const pulse = (Math.sin(Date.now() * 0.003) + 1) * 0.5;
+    ctx.textAlign = 'center';
+    ctx.font = 'bold ' + Math.min(48, W * 0.12) + 'px system-ui';
+    ctx.fillStyle = '#0ff';
+    ctx.shadowColor = '#0ff'; ctx.shadowBlur = 20;
+    ctx.fillText('GAME OVER', W/2, H * 0.38);
+    ctx.shadowBlur = 0;
+    ctx.font = 'bold ' + Math.min(26, W * 0.065) + 'px system-ui';
+    ctx.fillStyle = '#fff';
+    ctx.fillText('SCORE: ' + score, W/2, H * 0.48);
+    ctx.font = 'bold ' + Math.min(22, W * 0.055) + 'px system-ui';
+    ctx.fillStyle = `rgba(0,255,255,${0.5 + pulse * 0.5})`;
+    ctx.shadowColor = '#0ff'; ctx.shadowBlur = 10 + pulse * 15;
+    ctx.fillText('TAP TO PLAY AGAIN', W/2, H * 0.60);
+    ctx.shadowBlur = 0;
+    return;
+  }
+
+  // Orbs
   for (const o of orbs) {
     ctx.save();
     const glowSize = 20 + o.glow * 10;
     const grad = ctx.createRadialGradient(o.x, o.y, o.r * 0.3, o.x, o.y, o.r + glowSize);
-    grad.addColorStop(0, o.color.rgb);
-    grad.addColorStop(0.4, o.color.rgb + (o.glitch ? '88' : 'aa'));
+    grad.addColorStop(0, o.color);
+    grad.addColorStop(0.4, o.color + (o.glitch ? '88' : 'aa'));
     grad.addColorStop(1, 'transparent');
     ctx.fillStyle = grad;
     ctx.beginPath();
     ctx.arc(o.x, o.y, o.r + glowSize, 0, Math.PI * 2);
     ctx.fill();
-
-    ctx.fillStyle = o.color.rgb;
-    ctx.shadowColor = o.color.rgb;
-    ctx.shadowBlur = 15;
+    ctx.fillStyle = o.color;
+    ctx.shadowColor = o.color; ctx.shadowBlur = 15;
     ctx.beginPath();
     ctx.arc(o.x, o.y, o.r, 0, Math.PI * 2);
     ctx.fill();
-
-    // Inner highlight
     ctx.fillStyle = 'rgba(255,255,255,0.3)';
     ctx.beginPath();
-    ctx.arc(o.x - o.r * 0.25, o.y - o.r * 0.25, o.r * 0.4, 0, Math.PI * 2);
+    ctx.arc(o.x - o.r*0.25, o.y - o.r*0.25, o.r*0.4, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
-
     if (o.glitch) {
       ctx.save();
-      ctx.strokeStyle = '#f33';
-      ctx.lineWidth = 2;
+      ctx.strokeStyle = '#f33'; ctx.lineWidth = 2;
       ctx.setLineDash([3, 3]);
       ctx.beginPath();
       ctx.arc(o.x, o.y, o.r + 4, 0, Math.PI * 2);
@@ -325,42 +242,56 @@ function draw() {
     }
   }
 
-  // Draw paddle
+  // Paddle
   ctx.save();
-  const pGrad = ctx.createLinearGradient(paddle.x - paddle.w/2, paddle.y, paddle.x + paddle.w/2, paddle.y);
-  pGrad.addColorStop(0, '#0ff');
-  pGrad.addColorStop(0.5, '#08f');
-  pGrad.addColorStop(1, '#0ff');
-  ctx.fillStyle = pGrad;
-  ctx.shadowColor = '#0ff';
-  ctx.shadowBlur = 20;
-  const pr = 8;
-  const px = paddle.x - paddle.w/2, py = paddle.y - paddle.h/2;
+  const pg = ctx.createLinearGradient(paddle.x - paddle.w/2, 0, paddle.x + paddle.w/2, 0);
+  pg.addColorStop(0, '#0ff'); pg.addColorStop(0.5, '#08f'); pg.addColorStop(1, '#0ff');
+  ctx.fillStyle = pg;
+  ctx.shadowColor = '#0ff'; ctx.shadowBlur = 20;
+  const pr = 8, px = paddle.x - paddle.w/2, py = paddle.y - paddle.h/2;
   ctx.beginPath();
-  ctx.moveTo(px + pr, py);
-  ctx.lineTo(px + paddle.w - pr, py);
-  ctx.quadraticCurveTo(px + paddle.w, py, px + paddle.w, py + pr);
-  ctx.lineTo(px + paddle.w, py + paddle.h - pr);
-  ctx.quadraticCurveTo(px + paddle.w, py + paddle.h, px + paddle.w - pr, py + paddle.h);
-  ctx.lineTo(px + pr, py + paddle.h);
-  ctx.quadraticCurveTo(px, py + paddle.h, px, py + paddle.h - pr);
-  ctx.lineTo(px, py + pr);
-  ctx.quadraticCurveTo(px, py, px + pr, py);
+  ctx.moveTo(px+pr, py);
+  ctx.lineTo(px+paddle.w-pr, py);
+  ctx.quadraticCurveTo(px+paddle.w, py, px+paddle.w, py+pr);
+  ctx.lineTo(px+paddle.w, py+paddle.h-pr);
+  ctx.quadraticCurveTo(px+paddle.w, py+paddle.h, px+paddle.w-pr, py+paddle.h);
+  ctx.lineTo(px+pr, py+paddle.h);
+  ctx.quadraticCurveTo(px, py+paddle.h, px, py+paddle.h-pr);
+  ctx.lineTo(px, py+pr);
+  ctx.quadraticCurveTo(px, py, px+pr, py);
   ctx.fill();
   ctx.restore();
 
-  // Draw particles
+  // Particles
   for (const p of particles) {
     ctx.globalAlpha = p.life;
     ctx.fillStyle = p.color;
-    ctx.shadowColor = p.color;
-    ctx.shadowBlur = 8;
+    ctx.shadowColor = p.color; ctx.shadowBlur = 8;
     ctx.beginPath();
     ctx.arc(p.x, p.y, p.r * p.life, 0, Math.PI * 2);
     ctx.fill();
   }
-  ctx.globalAlpha = 1;
+  ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+
+  // HUD
+  ctx.font = 'bold 20px system-ui';
+  ctx.fillStyle = '#0ff'; ctx.textAlign = 'left';
+  ctx.shadowColor = '#0ff'; ctx.shadowBlur = 10;
+  ctx.fillText('SCORE: ' + score, 16, 36);
   ctx.shadowBlur = 0;
+  let hearts = '';
+  for (let i = 0; i < lives; i++) hearts += '♥ ';
+  ctx.fillStyle = '#f55'; ctx.textAlign = 'right';
+  ctx.shadowColor = '#f55'; ctx.shadowBlur = 10;
+  ctx.fillText(hearts.trim(), W - 16, 36);
+  ctx.shadowBlur = 0;
+  if (combo > 1) {
+    ctx.font = 'bold 16px system-ui';
+    ctx.fillStyle = '#f0f'; ctx.textAlign = 'left';
+    ctx.shadowColor = '#f0f'; ctx.shadowBlur = 8;
+    ctx.fillText('COMBO x' + combo, 16, 60);
+    ctx.shadowBlur = 0;
+  }
 }
 
 function gameLoop(time) {
@@ -371,33 +302,19 @@ function gameLoop(time) {
   requestAnimationFrame(gameLoop);
 }
 
-function startGame() {
-  document.getElementById('start-screen').style.display = 'none';
-  document.getElementById('game-over-screen').style.display = 'none';
-  resetGame();
-  gameRunning = true;
-}
-
-function endGame() {
-  gameRunning = false;
-  document.getElementById('final-score').textContent = 'SCORE: ' + score;
-  document.getElementById('game-over-screen').style.display = 'flex';
-}
-
-// Input handling
-function movePaddle(clientX) {
-  paddle.x = Math.max(paddle.w/2, Math.min(W - paddle.w/2, clientX));
-}
-
-// Pointer events work for both touch and mouse, no click-synthesis conflicts
-canvas.addEventListener('pointermove', (e) => {
-  if (gameRunning) movePaddle(e.clientX);
-});
 canvas.addEventListener('pointerdown', (e) => {
-  if (gameRunning) movePaddle(e.clientX);
+  e.preventDefault();
+  if (gameState === PLAYING) {
+    movePaddle(e.clientX);
+  } else {
+    startGame();
+  }
 });
 
-// Init
+canvas.addEventListener('pointermove', (e) => {
+  if (gameState === PLAYING) movePaddle(e.clientX);
+});
+
 initStars();
 lastTime = performance.now();
 requestAnimationFrame(gameLoop);
