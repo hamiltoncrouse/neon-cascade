@@ -303,7 +303,7 @@ function gameLoop(time) {
 }
 
 canvas.addEventListener('pointerdown', (e) => {
-  e.preventDefault();
+  canvas.setPointerCapture(e.pointerId);
   if (gameState === PLAYING) {
     movePaddle(e.clientX);
   } else {
