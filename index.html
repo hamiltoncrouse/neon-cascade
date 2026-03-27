@@ -75,7 +75,7 @@
 
 <div id="ui-overlay">
   <div id="score-display">SCORE: 0</div>
-  <div id="combo-display">COMBO x1</div>
+  <div id="combo-display"></div>
   <div id="lives-display"></div>
 </div>
 
@@ -390,9 +390,7 @@ function movePaddle(clientX) {
   paddle.x = Math.max(paddle.w/2, Math.min(W - paddle.w/2, clientX));
 }
 
-canvas.addEventListener('mousedown', (e) => { inputActive = true; movePaddle(e.clientX); });
-canvas.addEventListener('mousemove', (e) => { if (inputActive) movePaddle(e.clientX); });
-window.addEventListener('mouseup', () => { inputActive = false; });
+canvas.addEventListener('mousemove', (e) => { movePaddle(e.clientX); });
 
 canvas.addEventListener('touchstart', (e) => {
   e.preventDefault(); inputActive = true;
@@ -406,6 +404,12 @@ canvas.addEventListener('touchend', () => { inputActive = false; });
 
 document.getElementById('startBtn').addEventListener('click', startGame);
 document.getElementById('restartBtn').addEventListener('click', startGame);
+
+// Keyboard support
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowLeft') paddle.x = Math.max(paddle.w/2, paddle.x - 20);
+  if (e.key === 'ArrowRight') paddle.x = Math.min(W - paddle.w/2, paddle.x + 20);
+});
 
 // Init
 initStars();
