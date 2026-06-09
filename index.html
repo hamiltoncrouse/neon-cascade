@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#0a0a1a">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="description" content="Neon Cascade — catch the falling neon orbs, chain combos, grab power-ups!">
+<meta name="description" content="Neon Cascade — catch the falling neon orbs, chain combos, clear levels!">
 <title>Neon Cascade</title>
 <style>
   :root { --sat: env(safe-area-inset-top, 0px); --sab: env(safe-area-inset-bottom, 0px); }
@@ -27,7 +27,7 @@
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d', { alpha: false });
 
-const TITLE = 0, PLAYING = 1, GAMEOVER = 2, PAUSED = 3;
+const TITLE = 0, PLAYING = 1, GAMEOVER = 2, PAUSED = 3, LEVELCLEAR = 4, HOWTO = 5;
 let gameState = TITLE;
 
 let W = 0, H = 0, dpr = 1, safeTop = 0, safeBottom = 0, bgGrad = null;
@@ -39,9 +39,14 @@ let comboT = 0;
 const COMBO_WINDOW = 3.5;
 const MAX_LIVES = 5;
 let orbs = [], powerups = [], particles = [], texts = [], bgStars = [];
-let spawnTimer = 0, puTimer = 8, difficulty = 1, lastTime = 0;
+let spawnTimer = 0, puTimer = 8, lastTime = 0;
 let shakeT = 0, shakeMag = 0, newBest = false, gameOverAt = 0;
 const effects = { wide: 0, slow: 0, x2: 0, magnet: 0 };
+
+// Level system
+let level = 1, orbsCaught = 0, orbsNeeded = 15;
+let levelClearT = 0, bannerT = 0, lastBonus = 0, gainedLife = false;
+let mods = null, nextMods = null;
 
 try { best = parseInt(localStorage.getItem('nc_best') || '0', 10) || 0; } catch (e) {}
 
@@ -55,6 +60,44 @@ const PTYPES = [
   { k: 'magnet', icon: '◎',  color: '#ff66ff', dur: 7, w: 0.18 },
   { k: 'life',   icon: '♥',  color: '#ff5566', dur: 0, w: 0.12 }
 ];
+
+// Each level past the first adds one of these twists, cycling with rising intensity
+const THEMES = [
+  { name: 'SPEED UP',     desc: 'Orbs fall faster',          speed: 1.25 },
+  { name: 'CROSSWIND',    desc: 'Orbs drift in the wind',    wind: 70 },
+  { name: 'GLITCH SWARM', desc: 'Extra red orbs — careful!', glitch: 0.12 },
+  { name: 'TINY ORBS',    desc: 'Smaller, trickier orbs',    size: 0.72 },
+  { name: 'ZIGZAG',       desc: 'Orbs weave wildly',         wobble: 2.6 },
+  { name: 'METEOR RUSH',  desc: 'Orbs arrive in bursts',     burst: true }
+];
+
+function computeMods(lvl) {
+  const m = {
+    name: 'WARM UP', desc: 'Catch the falling orbs!',
+    speed: 1 + (lvl - 1) * 0.07,
+    glitchAdd: Math.min(0.18, (lvl - 1) * 0.012),
+    wind: 0, wobble: 1, size: 1, burst: false
+  };
+  if (lvl >= 2) {
+    const t = THEMES[(lvl - 2) % THEMES.length];
+    m.name = t.name; m.desc = t.desc;
+    if (t.speed) m.speed *= t.speed;
+    if (t.glitch) m.glitchAdd += t.glitch;
+    if (t.wind) m.wind = t.wind;
+    if (t.wobble) m.wobble = t.wobble;
+    if (t.size) m.size = t.size;
+    if (t.burst) m.burst = true;
+  }
+  return m;
+}
+
+function setLevel(lvl) {
+  level = lvl;
+  orbsCaught = 0;
+  orbsNeeded = Math.min(40, 10 + lvl * 5);
+  mods = computeMods(lvl);
+  bannerT = 2.4;
+}
 
 function resize() {
   dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -148,10 +191,11 @@ function initStars() {
 function resetGame() {
   score = 0; combo = 0; maxCombo = 0; lives = 3; playTime = 0; comboT = 0;
   orbs = []; powerups = []; particles = []; texts = [];
-  spawnTimer = 0; puTimer = 6 + Math.random() * 4; difficulty = 1;
+  spawnTimer = 0; puTimer = 6 + Math.random() * 4;
   shakeT = 0; newBest = false;
   for (const k in effects) effects[k] = 0;
   paddle.x = W / 2; paddle.targetX = W / 2; paddle.w = paddle.baseW;
+  setLevel(1);
 }
 
 function startGame() {
@@ -171,16 +215,39 @@ function endGame() {
   buzz(180);
 }
 
+function levelClear() {
+  lastBonus = 100 * level;
+  score += lastBonus;
+  gainedLife = lives < MAX_LIVES;
+  if (gainedLife) lives++;
+  for (const o of orbs) if (!o.glitch) spawnParticles(o.x, o.y, o.color, 6);
+  orbs = []; powerups = [];
+  combo = 0; comboT = 0;
+  nextMods = computeMods(level + 1);
+  levelClearT = 0;
+  beep(523, 0.14, 'square', 0.09);
+  beep(659, 0.14, 'square', 0.09);
+  beep(784, 0.25, 'square', 0.09);
+  buzz([30, 30, 30, 30, 60]);
+  gameState = LEVELCLEAR;
+}
+
+function advanceLevel() {
+  setLevel(level + 1);
+  spawnTimer = 0.8;
+  gameState = PLAYING;
+}
+
 function spawnOrb() {
-  const isGlitch = Math.random() < Math.min(0.32, 0.10 + difficulty * 0.045);
+  const isGlitch = Math.random() < Math.min(0.34, 0.08 + mods.glitchAdd);
   const color = isGlitch ? GLITCH_COLOR : COLORS[Math.floor(Math.random() * COLORS.length)];
-  const r = Math.random() * 12 + 14;
+  const r = (Math.random() * 12 + 14) * mods.size;
   orbs.push({
     x: Math.random() * (W - 50) + 25, y: -r, r,
-    speed: (70 + Math.random() * 60) * (0.9 + difficulty * 0.22),
+    speed: (70 + Math.random() * 60) * mods.speed * (1 + (orbsCaught / orbsNeeded) * 0.12),
     color, glitch: isGlitch,
     wobble: Math.random() * Math.PI * 2,
-    wobbleSpeed: (Math.random() - 0.5) * 3
+    wobbleSpeed: (Math.random() - 0.5) * 3 * mods.wobble
   });
 }
 
@@ -251,13 +318,17 @@ function update(dt) {
     updateParticles(dt);
     updateTexts(dt);
     if (shakeT > 0) shakeT -= dt;
+    if (gameState === LEVELCLEAR) {
+      levelClearT += dt;
+      if (levelClearT > 3) advanceLevel();
+    }
     return;
   }
 
   playTime += dt;
   const ts = effects.slow > 0 ? 0.45 : 1;
   for (const k in effects) if (effects[k] > 0) effects[k] = Math.max(0, effects[k] - dt);
-  difficulty = Math.min(4, 1 + playTime / 35 + score / 900);
+  if (bannerT > 0) bannerT -= dt;
 
   const targetW = paddle.baseW * (effects.wide > 0 ? 1.65 : 1);
   paddle.w += (targetW - paddle.w) * Math.min(1, dt * 8);
@@ -272,7 +343,8 @@ function update(dt) {
   spawnTimer -= dt * ts;
   if (spawnTimer <= 0) {
     spawnOrb();
-    spawnTimer = Math.max(0.28, 1.1 - difficulty * 0.13) * (0.7 + Math.random() * 0.6);
+    if (mods.burst && Math.random() < 0.35) { spawnOrb(); spawnOrb(); }
+    spawnTimer = Math.max(0.3, 0.95 - level * 0.045) * (0.7 + Math.random() * 0.6);
   }
   puTimer -= dt;
   if (puTimer <= 0) {
@@ -280,11 +352,13 @@ function update(dt) {
     puTimer = 7 + Math.random() * 6;
   }
 
+  const windX = mods.wind ? mods.wind * Math.sin(playTime * 0.8) : 0;
+
   for (let i = orbs.length - 1; i >= 0; i--) {
     const o = orbs[i];
     o.y += o.speed * ts * dt;
     o.wobble += o.wobbleSpeed * dt;
-    o.x += Math.sin(o.wobble) * 30 * dt;
+    o.x += Math.sin(o.wobble) * 30 * dt + windX * dt;
     if (effects.magnet > 0 && !o.glitch && o.y > H * 0.35) {
       o.x += (paddle.x - o.x) * Math.min(1, dt * 2.5);
     }
@@ -312,6 +386,12 @@ function update(dt) {
         beep(280 + Math.min(combo, 18) * 36, 0.12, 'sine', 0.1);
         beep(560 + Math.min(combo, 18) * 36, 0.09, 'triangle', 0.05);
         buzz(12);
+        orbsCaught++;
+        if (orbsCaught >= orbsNeeded) {
+          orbs.splice(i, 1);
+          levelClear();
+          return;
+        }
       }
       orbs.splice(i, 1);
       continue;
@@ -446,10 +526,19 @@ function drawHUD() {
     }
   }
 
-  if (gameState === PLAYING) {
+  if (gameState === PLAYING || gameState === LEVELCLEAR) {
     ctx.fillStyle = 'rgba(255,255,255,0.35)';
     ctx.fillRect(W/2 - 10, top + 6, 6, 18);
     ctx.fillRect(W/2 + 4, top + 6, 6, 18);
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 11px sans-serif';
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.fillText('LV ' + level, W/2, top + 40);
+    const lw = 90;
+    ctx.fillStyle = 'rgba(255,255,255,0.15)';
+    ctx.fillRect(W/2 - lw/2, top + 46, lw, 4);
+    ctx.fillStyle = '#00ff66';
+    ctx.fillRect(W/2 - lw/2, top + 46, lw * Math.min(1, orbsCaught / orbsNeeded), 4);
   }
 
   if (gameState === PLAYING && combo > 1) {
@@ -467,27 +556,106 @@ function drawHUD() {
   }
 }
 
+function drawBanner() {
+  const a = Math.min(1, bannerT);
+  ctx.globalAlpha = a;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+  ctx.font = 'bold 30px sans-serif'; ctx.fillStyle = '#00ffff';
+  ctx.shadowColor = '#00ffff'; ctx.shadowBlur = 16;
+  ctx.fillText('LEVEL ' + level, W/2, H * 0.30);
+  ctx.shadowBlur = 0;
+  ctx.font = 'bold 18px sans-serif'; ctx.fillStyle = '#ff66ff';
+  ctx.fillText(mods.name, W/2, H * 0.36);
+  ctx.font = '14px sans-serif'; ctx.fillStyle = 'rgba(255,255,255,0.8)';
+  ctx.fillText(mods.desc, W/2, H * 0.41);
+  ctx.globalAlpha = 1;
+}
+
 function drawTitle() {
   const pulse = (Math.sin(Date.now() * 0.003) + 1) * 0.5;
   ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
   ctx.font = 'bold ' + Math.min(52, W * 0.11) + 'px sans-serif';
   ctx.fillStyle = '#00ffff';
   ctx.shadowColor = '#00ffff'; ctx.shadowBlur = 24;
-  ctx.fillText('NEON CASCADE', W/2, H * 0.30);
+  ctx.fillText('NEON CASCADE', W/2, H * 0.28);
   ctx.shadowBlur = 0;
   ctx.font = '16px sans-serif'; ctx.fillStyle = '#ff66ff';
-  ctx.fillText('Catch the falling neon orbs', W/2, H * 0.38);
+  ctx.fillText('Catch the falling neon orbs', W/2, H * 0.36);
   if (best > 0) {
     ctx.font = 'bold 15px sans-serif'; ctx.fillStyle = '#ffee00';
-    ctx.fillText('BEST: ' + best, W/2, H * 0.45);
+    ctx.fillText('BEST: ' + best, W/2, H * 0.43);
   }
   ctx.font = 'bold 26px sans-serif';
   ctx.fillStyle = 'rgba(0,255,255,' + (0.45 + pulse * 0.55) + ')';
-  ctx.fillText('TAP TO PLAY', W/2, H * 0.56);
+  ctx.fillText('TAP TO PLAY', W/2, H * 0.54);
   ctx.font = '13px sans-serif'; ctx.fillStyle = 'rgba(255,255,255,0.55)';
-  ctx.fillText('Drag anywhere to move the paddle', W/2, H * 0.66);
-  ctx.fillText('Avoid red glitch orbs · Grab power-ups', W/2, H * 0.71);
-  ctx.fillText('Chain catches for combo fever!', W/2, H * 0.76);
+  ctx.fillText('Drag anywhere to move the paddle', W/2, H * 0.64);
+  ctx.fillText('Avoid red glitch orbs · Grab power-ups', W/2, H * 0.69);
+  ctx.fillText('Clear the orb quota to level up!', W/2, H * 0.74);
+  ctx.font = 'bold 16px sans-serif';
+  ctx.fillStyle = 'rgba(255,238,0,' + (0.6 + pulse * 0.4) + ')';
+  ctx.fillText('HOW TO PLAY', W/2, H * 0.84);
+}
+
+function drawHowTo() {
+  ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+  ctx.font = 'bold 30px sans-serif'; ctx.fillStyle = '#00ffff';
+  ctx.shadowColor = '#00ffff'; ctx.shadowBlur = 16;
+  ctx.fillText('HOW TO PLAY', W/2, H * 0.12);
+  ctx.shadowBlur = 0;
+  const lines = [
+    ['Drag anywhere — the paddle follows', '#ffffff'],
+    ['Catch neon orbs to score', '#00ffff'],
+    ['Red dashed orbs cost a life — dodge!', '#ff5566'],
+    ['Chain catches to build a combo', '#ff66ff'],
+    ['Reach x8 for FEVER: double points', '#ffee00'],
+    ['', ''],
+    ['POWER-UPS', '#00ffff'],
+    ['⟷ Wide paddle      ❄ Slow motion', '#99ddff'],
+    ['2× Double score    ◎ Orb magnet', '#ffee00'],
+    ['♥ Extra life (max 5)', '#ff5566'],
+    ['', ''],
+    ['LEVELS', '#00ffff'],
+    ['Catch the orb quota to clear a level', '#00ff66'],
+    ['Every level adds a new twist —', '#00ff66'],
+    ['wind, bursts, tiny orbs and more!', '#00ff66']
+  ];
+  ctx.font = '15px sans-serif';
+  let y = H * 0.19;
+  for (const l of lines) {
+    if (l[0]) { ctx.fillStyle = l[1]; ctx.fillText(l[0], W/2, y); }
+    y += H * 0.042;
+  }
+  const pulse = (Math.sin(Date.now() * 0.003) + 1) * 0.5;
+  ctx.font = 'bold 22px sans-serif';
+  ctx.fillStyle = 'rgba(0,255,255,' + (0.45 + pulse * 0.55) + ')';
+  ctx.fillText('TAP TO START', W/2, H * 0.90);
+}
+
+function drawLevelClear() {
+  ctx.fillStyle = 'rgba(5,5,15,0.65)';
+  ctx.fillRect(0, 0, W, H);
+  const pulse = (Math.sin(Date.now() * 0.003) + 1) * 0.5;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+  ctx.font = 'bold 36px sans-serif'; ctx.fillStyle = '#00ff66';
+  ctx.shadowColor = '#00ff66'; ctx.shadowBlur = 20;
+  ctx.fillText('LEVEL ' + level + ' CLEAR!', W/2, H * 0.32);
+  ctx.shadowBlur = 0;
+  ctx.font = 'bold 22px sans-serif'; ctx.fillStyle = '#ffee00';
+  ctx.fillText('+' + lastBonus + ' BONUS', W/2, H * 0.41);
+  if (gainedLife) {
+    ctx.font = 'bold 18px sans-serif'; ctx.fillStyle = '#ff5566';
+    ctx.fillText('+1 ♥', W/2, H * 0.47);
+  }
+  ctx.font = 'bold 18px sans-serif'; ctx.fillStyle = '#ff66ff';
+  ctx.fillText('NEXT — ' + nextMods.name, W/2, H * 0.57);
+  ctx.font = '14px sans-serif'; ctx.fillStyle = 'rgba(255,255,255,0.7)';
+  ctx.fillText(nextMods.desc, W/2, H * 0.62);
+  if (levelClearT > 0.6) {
+    ctx.font = 'bold 20px sans-serif';
+    ctx.fillStyle = 'rgba(0,255,255,' + (0.45 + pulse * 0.55) + ')';
+    ctx.fillText('TAP TO CONTINUE', W/2, H * 0.72);
+  }
 }
 
 function drawGameOver() {
@@ -511,7 +679,7 @@ function drawGameOver() {
     ctx.fillText('BEST: ' + best, W/2, H * 0.48);
   }
   ctx.font = '14px sans-serif'; ctx.fillStyle = 'rgba(255,255,255,0.5)';
-  ctx.fillText('Max combo: x' + maxCombo, W/2, H * 0.54);
+  ctx.fillText('Level ' + level + ' · Max combo x' + maxCombo, W/2, H * 0.54);
   ctx.font = 'bold 22px sans-serif';
   ctx.fillStyle = 'rgba(0,255,255,' + (0.45 + pulse * 0.55) + ')';
   ctx.fillText('TAP TO PLAY AGAIN', W/2, H * 0.64);
@@ -549,6 +717,11 @@ function draw() {
     ctx.restore();
     return;
   }
+  if (gameState === HOWTO) {
+    drawHowTo();
+    ctx.restore();
+    return;
+  }
 
   ctx.globalCompositeOperation = 'lighter';
   for (const o of orbs) {
@@ -576,6 +749,8 @@ function draw() {
   ctx.restore();
 
   drawHUD();
+  if (gameState === PLAYING && bannerT > 0) drawBanner();
+  if (gameState === LEVELCLEAR) drawLevelClear();
   if (gameState === GAMEOVER) drawGameOver();
   if (gameState === PAUSED) drawPaused();
 }
@@ -603,10 +778,15 @@ canvas.addEventListener('pointerdown', (e) => {
     paddle.targetX = e.clientX;
   } else if (gameState === PAUSED) {
     gameState = PLAYING;
+  } else if (gameState === LEVELCLEAR) {
+    if (levelClearT > 0.6) advanceLevel();
   } else if (gameState === GAMEOVER) {
     if (Date.now() - gameOverAt > 600) startGame();
-  } else {
+  } else if (gameState === HOWTO) {
     startGame();
+  } else {
+    if (Math.abs(e.clientY - H * 0.84) < 28) gameState = HOWTO;
+    else startGame();
   }
 });
 canvas.addEventListener('pointermove', (e) => {
@@ -627,6 +807,7 @@ window.addEventListener('blur', () => {
 });
 
 initStars();
+setLevel(1);
 lastTime = performance.now();
 requestAnimationFrame(gameLoop);
 </script>
