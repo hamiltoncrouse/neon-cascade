@@ -2,90 +2,156 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0a0a1a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="description" content="Neon Cascade — catch the falling neon orbs, chain combos, grab power-ups!">
 <title>Neon Cascade</title>
 <style>
+  :root { --sat: env(safe-area-inset-top, 0px); --sab: env(safe-area-inset-bottom, 0px); }
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  html, body { width: 100%; height: 100%; overflow: hidden; background: #0a0a1a; }
+  html, body {
+    width: 100%; height: 100%; overflow: hidden; background: #0a0a1a;
+    position: fixed; overscroll-behavior: none;
+    -webkit-user-select: none; user-select: none;
+    -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;
+  }
   canvas { display: block; width: 100%; height: 100%; touch-action: none; }
 </style>
 </head>
 <body>
 <canvas id="gameCanvas"></canvas>
 <script>
+'use strict';
 const canvas = document.getElementById('gameCanvas');
-const ctx = canvas.getContext('2d');
+const ctx = canvas.getContext('2d', { alpha: false });
 
-let W, H, dpr;
+const TITLE = 0, PLAYING = 1, GAMEOVER = 2, PAUSED = 3;
+let gameState = TITLE;
+
+let W = 0, H = 0, dpr = 1, safeTop = 0, safeBottom = 0, bgGrad = null;
+
+const paddle = { x: 0, y: 0, w: 120, baseW: 120, h: 18, targetX: 0 };
+
+let score = 0, best = 0, combo = 0, maxCombo = 0, lives = 3, playTime = 0;
+let comboT = 0;
+const COMBO_WINDOW = 3.5;
+const MAX_LIVES = 5;
+let orbs = [], powerups = [], particles = [], texts = [], bgStars = [];
+let spawnTimer = 0, puTimer = 8, difficulty = 1, lastTime = 0;
+let shakeT = 0, shakeMag = 0, newBest = false, gameOverAt = 0;
+const effects = { wide: 0, slow: 0, x2: 0, magnet: 0 };
+
+try { best = parseInt(localStorage.getItem('nc_best') || '0', 10) || 0; } catch (e) {}
+
+const COLORS = ['#00ffff', '#ff00ff', '#00ff66', '#ffee00', '#aa66ff'];
+const GLITCH_COLOR = '#ff3344';
+
+const PTYPES = [
+  { k: 'wide',   icon: '⟷',  color: '#00ffff', dur: 8, w: 0.30 },
+  { k: 'slow',   icon: '❄',  color: '#99ddff', dur: 6, w: 0.20 },
+  { k: 'x2',     icon: '2×', color: '#ffee00', dur: 8, w: 0.20 },
+  { k: 'magnet', icon: '◎',  color: '#ff66ff', dur: 7, w: 0.18 },
+  { k: 'life',   icon: '♥',  color: '#ff5566', dur: 0, w: 0.12 }
+];
+
 function resize() {
-  dpr = window.devicePixelRatio || 1;
+  dpr = Math.min(2, window.devicePixelRatio || 1);
   W = window.innerWidth;
   H = window.innerHeight;
-  canvas.width = W * dpr;
-  canvas.height = H * dpr;
+  canvas.width = Math.round(W * dpr);
+  canvas.height = Math.round(H * dpr);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const cs = getComputedStyle(document.documentElement);
+  safeTop = parseFloat(cs.getPropertyValue('--sat')) || 0;
+  safeBottom = parseFloat(cs.getPropertyValue('--sab')) || 0;
+  paddle.y = H - 46 - Math.max(safeBottom, 16);
+  paddle.baseW = Math.max(96, Math.min(160, W * 0.27));
+  bgGrad = ctx.createLinearGradient(0, 0, 0, H);
+  bgGrad.addColorStop(0, '#0a0a1a');
+  bgGrad.addColorStop(1, '#1a0a2a');
+  paddle.x = Math.max(paddle.w / 2, Math.min(W - paddle.w / 2, paddle.x || W / 2));
+  paddle.targetX = paddle.x;
 }
 resize();
 window.addEventListener('resize', resize);
+window.addEventListener('orientationchange', () => setTimeout(resize, 100));
 
-const TITLE = 0, PLAYING = 1, GAMEOVER = 2;
-let gameState = TITLE;
+// --- Audio (WebAudio synth, no assets) ---
+let actx = null;
+function initAudio() {
+  if (!actx) {
+    try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
+  }
+  if (actx && actx.state === 'suspended') actx.resume();
+}
+function beep(freq, dur, type, vol, endFreq) {
+  if (!actx || actx.state !== 'running') return;
+  try {
+    const t = actx.currentTime;
+    const o = actx.createOscillator(), g = actx.createGain();
+    o.type = type || 'sine';
+    o.frequency.setValueAtTime(freq, t);
+    if (endFreq) o.frequency.exponentialRampToValueAtTime(Math.max(30, endFreq), t + dur);
+    g.gain.setValueAtTime(vol || 0.12, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(actx.destination);
+    o.start(t); o.stop(t + dur + 0.02);
+  } catch (e) {}
+}
+function buzz(pattern) {
+  if (navigator.vibrate) { try { navigator.vibrate(pattern); } catch (e) {} }
+}
 
-let score = 0, combo = 0, lives = 3;
-let paddle = { x: 0, y: 0, w: 120, h: 16 };
-let orbs = [], particles = [], bgStars = [];
-let spawnTimer = 0, difficulty = 1, lastTime = 0;
-
-const COLORS = ['#0ff', '#f0f', '#0f4', '#ff0', '#a0f'];
+// --- Pre-rendered orb sprites (gradients are too slow per-frame on mobile) ---
+const spriteCache = {};
+const SPRITE_R = 28, SPRITE_GLOW = 26, SPRITE_HALF = SPRITE_R + SPRITE_GLOW;
+function orbSprite(color, glitch) {
+  const key = color + (glitch ? 'g' : '');
+  if (spriteCache[key]) return spriteCache[key];
+  const S = SPRITE_HALF * 2;
+  const c = document.createElement('canvas');
+  c.width = c.height = S;
+  const g = c.getContext('2d');
+  const grad = g.createRadialGradient(S/2, S/2, SPRITE_R * 0.2, S/2, S/2, SPRITE_HALF);
+  grad.addColorStop(0, '#ffffff');
+  grad.addColorStop(0.25, color);
+  grad.addColorStop(0.55, color + '88');
+  grad.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, S, S);
+  g.fillStyle = color;
+  g.beginPath(); g.arc(S/2, S/2, SPRITE_R, 0, Math.PI * 2); g.fill();
+  g.fillStyle = 'rgba(255,255,255,0.45)';
+  g.beginPath(); g.arc(S/2 - SPRITE_R*0.3, S/2 - SPRITE_R*0.3, SPRITE_R*0.35, 0, Math.PI * 2); g.fill();
+  if (glitch) {
+    g.strokeStyle = '#ffffff'; g.lineWidth = 3; g.setLineDash([6, 6]);
+    g.beginPath(); g.arc(S/2, S/2, SPRITE_R + 8, 0, Math.PI * 2); g.stroke();
+  }
+  spriteCache[key] = c;
+  return c;
+}
 
 function initStars() {
   bgStars = [];
-  for (let i = 0; i < 80; i++) {
+  for (let i = 0; i < 60; i++) {
     bgStars.push({
       x: Math.random() * W, y: Math.random() * H,
-      r: Math.random() * 1.5 + 0.3,
-      speed: Math.random() * 15 + 5,
+      r: Math.random() * 1.5 + 0.4,
+      speed: Math.random() * 18 + 6,
       alpha: Math.random() * 0.6 + 0.2
     });
   }
 }
 
 function resetGame() {
-  score = 0; combo = 0; lives = 3;
-  orbs = []; particles = [];
-  spawnTimer = 0; difficulty = 1;
-  paddle.x = W / 2;
-  paddle.y = H - 60;
-  paddle.w = Math.min(120, W * 0.28);
-  initStars();
-}
-
-function spawnOrb() {
-  const isGlitch = Math.random() < 0.15 + difficulty * 0.02;
-  const color = isGlitch ? '#f33' : COLORS[Math.floor(Math.random() * COLORS.length)];
-  const r = Math.random() * 10 + 12;
-  orbs.push({
-    x: Math.random() * (W - 40) + 20, y: -r, r,
-    speed: (Math.random() * 40 + 60) * (1 + difficulty * 0.15),
-    color, glitch: isGlitch, glow: 0,
-    wobble: Math.random() * Math.PI * 2,
-    wobbleSpeed: (Math.random() - 0.5) * 2
-  });
-}
-
-function spawnParticles(x, y, color, count) {
-  for (let i = 0; i < count; i++) {
-    const angle = Math.random() * Math.PI * 2;
-    const speed = Math.random() * 150 + 50;
-    particles.push({
-      x, y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed - 50,
-      life: 1, decay: Math.random() * 1.5 + 1, r: Math.random() * 3 + 1, color
-    });
-  }
-}
-
-function movePaddle(clientX) {
-  paddle.x = Math.max(paddle.w / 2, Math.min(W - paddle.w / 2, clientX));
+  score = 0; combo = 0; maxCombo = 0; lives = 3; playTime = 0; comboT = 0;
+  orbs = []; powerups = []; particles = []; texts = [];
+  spawnTimer = 0; puTimer = 6 + Math.random() * 4; difficulty = 1;
+  shakeT = 0; newBest = false;
+  for (const k in effects) effects[k] = 0;
+  paddle.x = W / 2; paddle.targetX = W / 2; paddle.w = paddle.baseW;
 }
 
 function startGame() {
@@ -93,218 +159,471 @@ function startGame() {
   gameState = PLAYING;
 }
 
+function endGame() {
+  gameState = GAMEOVER;
+  gameOverAt = Date.now();
+  newBest = score > best;
+  if (newBest) {
+    best = score;
+    try { localStorage.setItem('nc_best', String(best)); } catch (e) {}
+  }
+  beep(440, 0.5, 'sawtooth', 0.15, 80);
+  buzz(180);
+}
+
+function spawnOrb() {
+  const isGlitch = Math.random() < Math.min(0.32, 0.10 + difficulty * 0.045);
+  const color = isGlitch ? GLITCH_COLOR : COLORS[Math.floor(Math.random() * COLORS.length)];
+  const r = Math.random() * 12 + 14;
+  orbs.push({
+    x: Math.random() * (W - 50) + 25, y: -r, r,
+    speed: (70 + Math.random() * 60) * (0.9 + difficulty * 0.22),
+    color, glitch: isGlitch,
+    wobble: Math.random() * Math.PI * 2,
+    wobbleSpeed: (Math.random() - 0.5) * 3
+  });
+}
+
+function pickPType() {
+  let r = Math.random(), acc = 0;
+  for (const p of PTYPES) { acc += p.w; if (r <= acc) return p; }
+  return PTYPES[0];
+}
+
+function spawnPowerup() {
+  powerups.push({
+    x: Math.random() * (W - 60) + 30, y: -20,
+    speed: 75 + Math.random() * 30,
+    type: pickPType(),
+    wobble: Math.random() * Math.PI * 2
+  });
+}
+
+const pool = [];
+function spawnParticles(x, y, color, count) {
+  for (let i = 0; i < count; i++) {
+    if (particles.length > 240) return;
+    const p = pool.pop() || {};
+    const a = Math.random() * Math.PI * 2, sp = Math.random() * 170 + 60;
+    p.x = x; p.y = y;
+    p.vx = Math.cos(a) * sp; p.vy = Math.sin(a) * sp - 60;
+    p.life = 1; p.decay = Math.random() * 1.6 + 1.1;
+    p.r = Math.random() * 3 + 1.5; p.color = color;
+    particles.push(p);
+  }
+}
+
+function addText(x, y, str, color) {
+  texts.push({ x, y, str, color, life: 1 });
+}
+
+function hitPaddle(x, y, r) {
+  const dx = x - Math.max(paddle.x - paddle.w/2, Math.min(x, paddle.x + paddle.w/2));
+  const dy = y - Math.max(paddle.y - paddle.h/2, Math.min(y, paddle.y + paddle.h/2));
+  return dx*dx + dy*dy < r*r;
+}
+
+function updateParticles(dt) {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx * dt; p.y += p.vy * dt;
+    p.vy += 220 * dt; p.life -= p.decay * dt;
+    if (p.life <= 0) { pool.push(p); particles.splice(i, 1); }
+  }
+}
+
+function updateTexts(dt) {
+  for (let i = texts.length - 1; i >= 0; i--) {
+    const t = texts[i];
+    t.y -= 45 * dt; t.life -= dt * 1.3;
+    if (t.life <= 0) texts.splice(i, 1);
+  }
+}
+
 function update(dt) {
+  if (gameState === PAUSED) return;
+
   if (gameState !== PLAYING) {
     for (const s of bgStars) {
       s.y += s.speed * dt;
-      if (s.y > H) { s.y = 0; s.x = Math.random() * W; }
+      if (s.y > H) { s.y = -2; s.x = Math.random() * W; }
     }
+    updateParticles(dt);
+    updateTexts(dt);
+    if (shakeT > 0) shakeT -= dt;
     return;
   }
 
-  difficulty = 1 + score / 500;
-  spawnTimer -= dt;
+  playTime += dt;
+  const ts = effects.slow > 0 ? 0.45 : 1;
+  for (const k in effects) if (effects[k] > 0) effects[k] = Math.max(0, effects[k] - dt);
+  difficulty = Math.min(4, 1 + playTime / 35 + score / 900);
+
+  const targetW = paddle.baseW * (effects.wide > 0 ? 1.65 : 1);
+  paddle.w += (targetW - paddle.w) * Math.min(1, dt * 8);
+  paddle.x += (paddle.targetX - paddle.x) * Math.min(1, dt * 18);
+  paddle.x = Math.max(paddle.w / 2, Math.min(W - paddle.w / 2, paddle.x));
+
+  if (combo > 0) {
+    comboT -= dt;
+    if (comboT <= 0) combo = 0;
+  }
+
+  spawnTimer -= dt * ts;
   if (spawnTimer <= 0) {
     spawnOrb();
-    spawnTimer = Math.max(0.3, 1.2 - difficulty * 0.08);
+    spawnTimer = Math.max(0.28, 1.1 - difficulty * 0.13) * (0.7 + Math.random() * 0.6);
+  }
+  puTimer -= dt;
+  if (puTimer <= 0) {
+    spawnPowerup();
+    puTimer = 7 + Math.random() * 6;
   }
 
   for (let i = orbs.length - 1; i >= 0; i--) {
     const o = orbs[i];
-    o.y += o.speed * dt;
+    o.y += o.speed * ts * dt;
     o.wobble += o.wobbleSpeed * dt;
-    o.x += Math.sin(o.wobble) * 0.5;
-    o.glow = (Math.sin(Date.now() * 0.005) + 1) * 0.5;
+    o.x += Math.sin(o.wobble) * 30 * dt;
+    if (effects.magnet > 0 && !o.glitch && o.y > H * 0.35) {
+      o.x += (paddle.x - o.x) * Math.min(1, dt * 2.5);
+    }
+    o.x = Math.max(o.r, Math.min(W - o.r, o.x));
 
-    const dx = o.x - Math.max(paddle.x - paddle.w/2, Math.min(o.x, paddle.x + paddle.w/2));
-    const dy = o.y - Math.max(paddle.y - paddle.h/2, Math.min(o.y, paddle.y + paddle.h/2));
-    if (dx*dx + dy*dy < o.r*o.r) {
+    if (hitPaddle(o.x, o.y, o.r)) {
       if (o.glitch) {
         lives--; combo = 0;
-        spawnParticles(o.x, o.y, '#f33', 15);
-        if (lives <= 0) gameState = GAMEOVER;
+        shakeT = 0.35; shakeMag = 9;
+        spawnParticles(o.x, o.y, GLITCH_COLOR, 18);
+        addText(o.x, o.y - 20, '-1 ♥', GLITCH_COLOR);
+        beep(160, 0.35, 'sawtooth', 0.18, 60);
+        buzz([60, 40, 60]);
+        if (lives <= 0) endGame();
       } else {
-        combo++;
-        score += 10 * combo;
-        spawnParticles(o.x, o.y, o.color, 12 + combo * 2);
+        combo++; comboT = COMBO_WINDOW;
+        if (combo > maxCombo) maxCombo = combo;
+        let mult = 1;
+        if (effects.x2 > 0) mult *= 2;
+        if (combo >= 8) mult *= 2;
+        const gain = 10 * combo * mult;
+        score += gain;
+        spawnParticles(o.x, o.y, o.color, 10 + Math.min(combo, 12) * 2);
+        addText(o.x, o.y - 16, '+' + gain, o.color);
+        beep(280 + Math.min(combo, 18) * 36, 0.12, 'sine', 0.1);
+        beep(560 + Math.min(combo, 18) * 36, 0.09, 'triangle', 0.05);
+        buzz(12);
       }
       orbs.splice(i, 1);
       continue;
     }
     if (o.y - o.r > H) {
-      if (!o.glitch) combo = 0;
+      if (!o.glitch && combo > 0) {
+        combo = 0;
+        addText(o.x, H - 110, 'MISS', '#ff8888');
+      }
       orbs.splice(i, 1);
     }
   }
 
-  for (let i = particles.length - 1; i >= 0; i--) {
-    const p = particles[i];
-    p.x += p.vx * dt; p.y += p.vy * dt;
-    p.vy += 200 * dt; p.life -= p.decay * dt;
-    if (p.life <= 0) particles.splice(i, 1);
+  for (let i = powerups.length - 1; i >= 0; i--) {
+    const u = powerups[i];
+    u.y += u.speed * ts * dt;
+    u.wobble += dt * 2;
+    u.x += Math.sin(u.wobble) * 20 * dt;
+    if (hitPaddle(u.x, u.y, 18)) {
+      const p = u.type;
+      if (p.k === 'life') {
+        if (lives < MAX_LIVES) { lives++; addText(u.x, u.y - 16, '+1 ♥', p.color); }
+        else { score += 200; addText(u.x, u.y - 16, '+200', p.color); }
+      } else {
+        effects[p.k] = p.dur;
+        addText(u.x, u.y - 16, p.icon, p.color);
+      }
+      spawnParticles(u.x, u.y, p.color, 16);
+      beep(420, 0.18, 'square', 0.1, 840);
+      buzz(20);
+      powerups.splice(i, 1);
+      continue;
+    }
+    if (u.y > H + 24) powerups.splice(i, 1);
   }
 
+  updateParticles(dt);
+  updateTexts(dt);
+
   for (const s of bgStars) {
-    s.y += s.speed * dt;
-    if (s.y > H) { s.y = 0; s.x = Math.random() * W; }
+    s.y += s.speed * (effects.slow > 0 ? 0.5 : 1) * dt;
+    if (s.y > H) { s.y = -2; s.x = Math.random() * W; }
+  }
+
+  if (shakeT > 0) shakeT -= dt;
+}
+
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+function drawPaddle() {
+  const fever = combo >= 8;
+  let c1 = '#00ffff', c2 = '#0088ff';
+  if (fever) {
+    const h = (Date.now() * 0.2) % 360;
+    c1 = 'hsl(' + h + ',100%,60%)';
+    c2 = 'hsl(' + ((h + 60) % 360) + ',100%,60%)';
+  }
+  const pg = ctx.createLinearGradient(paddle.x - paddle.w/2, 0, paddle.x + paddle.w/2, 0);
+  pg.addColorStop(0, c1); pg.addColorStop(0.5, c2); pg.addColorStop(1, c1);
+  ctx.save();
+  ctx.shadowColor = c1; ctx.shadowBlur = 18;
+  ctx.fillStyle = pg;
+  roundRect(paddle.x - paddle.w/2, paddle.y - paddle.h/2, paddle.w, paddle.h, 9);
+  ctx.fill();
+  ctx.restore();
+  if (effects.magnet > 0) {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,102,255,0.5)'; ctx.lineWidth = 2;
+    ctx.setLineDash([4, 6]);
+    ctx.beginPath(); ctx.arc(paddle.x, paddle.y, 70, Math.PI, Math.PI * 2); ctx.stroke();
+    ctx.restore();
   }
 }
 
-function draw() {
-  const bg = ctx.createLinearGradient(0, 0, 0, H);
-  bg.addColorStop(0, '#0a0a1a');
-  bg.addColorStop(1, '#1a0a2a');
-  ctx.fillStyle = bg;
-  ctx.fillRect(0, 0, W, H);
+function drawPowerups() {
+  for (const u of powerups) {
+    ctx.save();
+    ctx.fillStyle = 'rgba(10,10,30,0.85)';
+    ctx.strokeStyle = u.type.color; ctx.lineWidth = 2.5;
+    ctx.shadowColor = u.type.color; ctx.shadowBlur = 12;
+    ctx.beginPath(); ctx.arc(u.x, u.y, 16, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = u.type.color;
+    ctx.font = 'bold 14px sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(u.type.icon, u.x, u.y + 1);
+    ctx.restore();
+  }
+}
 
-  for (const s of bgStars) {
-    ctx.globalAlpha = s.alpha;
-    ctx.fillStyle = '#fff';
-    ctx.beginPath();
-    ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
-    ctx.fill();
+function drawTexts() {
+  ctx.font = 'bold 17px sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+  for (const t of texts) {
+    ctx.globalAlpha = Math.max(0, t.life);
+    ctx.fillStyle = t.color;
+    ctx.fillText(t.str, t.x, t.y);
   }
   ctx.globalAlpha = 1;
+}
 
-  if (gameState === TITLE) {
-    const pulse = (Math.sin(Date.now() * 0.003) + 1) * 0.5;
-    ctx.textAlign = 'center';
-    ctx.font = 'bold 48px sans-serif';
-    ctx.fillStyle = '#0ff';
-    ctx.fillText('NEON CASCADE', W/2, H * 0.35);
-    ctx.font = '18px sans-serif';
-    ctx.fillStyle = '#f0f';
-    ctx.fillText('Catch the falling neon orbs', W/2, H * 0.44);
-    ctx.font = 'bold 28px sans-serif';
-    ctx.fillStyle = 'rgba(0,255,255,' + (0.5 + pulse * 0.5) + ')';
-    ctx.fillText('TAP TO PLAY', W/2, H * 0.58);
-    ctx.font = '14px sans-serif';
-    ctx.fillStyle = 'rgba(255,255,255,0.5)';
-    ctx.fillText('Drag to move the paddle', W/2, H * 0.70);
-    ctx.fillText('Avoid the red glitch orbs!', W/2, H * 0.76);
-    return;
-  }
+function drawHUD() {
+  const top = safeTop + 10;
+  ctx.textBaseline = 'alphabetic';
+  ctx.font = 'bold 24px sans-serif'; ctx.textAlign = 'left';
+  ctx.fillStyle = '#00ffff';
+  ctx.fillText(score, 16, top + 24);
+  ctx.font = '11px sans-serif'; ctx.fillStyle = 'rgba(255,255,255,0.55)';
+  ctx.fillText('BEST ' + best, 16, top + 40);
 
-  if (gameState === GAMEOVER) {
-    const pulse = (Math.sin(Date.now() * 0.003) + 1) * 0.5;
-    ctx.textAlign = 'center';
-    ctx.font = 'bold 44px sans-serif';
-    ctx.fillStyle = '#0ff';
-    ctx.fillText('GAME OVER', W/2, H * 0.38);
-    ctx.font = 'bold 26px sans-serif';
-    ctx.fillStyle = '#fff';
-    ctx.fillText('SCORE: ' + score, W/2, H * 0.48);
-    ctx.font = 'bold 24px sans-serif';
-    ctx.fillStyle = 'rgba(0,255,255,' + (0.5 + pulse * 0.5) + ')';
-    ctx.fillText('TAP TO PLAY AGAIN', W/2, H * 0.60);
-    return;
-  }
+  ctx.font = 'bold 19px sans-serif'; ctx.textAlign = 'right';
+  ctx.fillStyle = '#ff5566';
+  let hearts = '';
+  for (let i = 0; i < lives; i++) hearts += '♥';
+  ctx.fillText(hearts, W - 14, top + 24);
 
-  // Orbs
-  for (const o of orbs) {
-    ctx.save();
-    const glowSize = 20 + o.glow * 10;
-    const grad = ctx.createRadialGradient(o.x, o.y, o.r * 0.3, o.x, o.y, o.r + glowSize);
-    grad.addColorStop(0, o.color);
-    grad.addColorStop(0.4, o.color + (o.glitch ? '88' : 'aa'));
-    grad.addColorStop(1, 'transparent');
-    ctx.fillStyle = grad;
-    ctx.beginPath();
-    ctx.arc(o.x, o.y, o.r + glowSize, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = o.color;
-    ctx.shadowColor = o.color; ctx.shadowBlur = 15;
-    ctx.beginPath();
-    ctx.arc(o.x, o.y, o.r, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = 'rgba(255,255,255,0.3)';
-    ctx.beginPath();
-    ctx.arc(o.x - o.r*0.25, o.y - o.r*0.25, o.r*0.4, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-    if (o.glitch) {
-      ctx.save();
-      ctx.strokeStyle = '#f33'; ctx.lineWidth = 2;
-      ctx.setLineDash([3, 3]);
-      ctx.beginPath();
-      ctx.arc(o.x, o.y, o.r + 4, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.restore();
+  let ey = top + 46;
+  ctx.font = 'bold 12px sans-serif';
+  for (const p of PTYPES) {
+    if (p.dur && effects[p.k] > 0) {
+      ctx.fillStyle = p.color;
+      ctx.fillText(p.icon + ' ' + Math.ceil(effects[p.k]), W - 14, ey);
+      ey += 18;
     }
   }
 
-  // Paddle
-  ctx.save();
-  const pg = ctx.createLinearGradient(paddle.x - paddle.w/2, 0, paddle.x + paddle.w/2, 0);
-  pg.addColorStop(0, '#0ff'); pg.addColorStop(0.5, '#08f'); pg.addColorStop(1, '#0ff');
-  ctx.fillStyle = pg;
-  ctx.shadowColor = '#0ff'; ctx.shadowBlur = 20;
-  const pr = 8, px = paddle.x - paddle.w/2, py = paddle.y - paddle.h/2;
-  ctx.beginPath();
-  ctx.moveTo(px+pr, py);
-  ctx.lineTo(px+paddle.w-pr, py);
-  ctx.quadraticCurveTo(px+paddle.w, py, px+paddle.w, py+pr);
-  ctx.lineTo(px+paddle.w, py+paddle.h-pr);
-  ctx.quadraticCurveTo(px+paddle.w, py+paddle.h, px+paddle.w-pr, py+paddle.h);
-  ctx.lineTo(px+pr, py+paddle.h);
-  ctx.quadraticCurveTo(px, py+paddle.h, px, py+paddle.h-pr);
-  ctx.lineTo(px, py+pr);
-  ctx.quadraticCurveTo(px, py, px+pr, py);
-  ctx.fill();
-  ctx.restore();
+  if (gameState === PLAYING) {
+    ctx.fillStyle = 'rgba(255,255,255,0.35)';
+    ctx.fillRect(W/2 - 10, top + 6, 6, 18);
+    ctx.fillRect(W/2 + 4, top + 6, 6, 18);
+  }
 
-  // Particles
+  if (gameState === PLAYING && combo > 1) {
+    const fever = combo >= 8;
+    ctx.textAlign = 'center';
+    ctx.font = 'bold ' + (fever ? 22 : 17) + 'px sans-serif';
+    ctx.fillStyle = fever ? 'hsl(' + ((Date.now() * 0.2) % 360) + ',100%,65%)' : '#ff66ff';
+    const cy = paddle.y - 64;
+    ctx.fillText((fever ? 'FEVER ' : 'COMBO ') + 'x' + combo, W/2, cy);
+    const bw = 110, frac = Math.max(0, comboT / COMBO_WINDOW);
+    ctx.fillStyle = 'rgba(255,255,255,0.15)';
+    ctx.fillRect(W/2 - bw/2, cy + 8, bw, 4);
+    ctx.fillStyle = fever ? '#ffffff' : '#ff66ff';
+    ctx.fillRect(W/2 - bw/2, cy + 8, bw * frac, 4);
+  }
+}
+
+function drawTitle() {
+  const pulse = (Math.sin(Date.now() * 0.003) + 1) * 0.5;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+  ctx.font = 'bold ' + Math.min(52, W * 0.11) + 'px sans-serif';
+  ctx.fillStyle = '#00ffff';
+  ctx.shadowColor = '#00ffff'; ctx.shadowBlur = 24;
+  ctx.fillText('NEON CASCADE', W/2, H * 0.30);
+  ctx.shadowBlur = 0;
+  ctx.font = '16px sans-serif'; ctx.fillStyle = '#ff66ff';
+  ctx.fillText('Catch the falling neon orbs', W/2, H * 0.38);
+  if (best > 0) {
+    ctx.font = 'bold 15px sans-serif'; ctx.fillStyle = '#ffee00';
+    ctx.fillText('BEST: ' + best, W/2, H * 0.45);
+  }
+  ctx.font = 'bold 26px sans-serif';
+  ctx.fillStyle = 'rgba(0,255,255,' + (0.45 + pulse * 0.55) + ')';
+  ctx.fillText('TAP TO PLAY', W/2, H * 0.56);
+  ctx.font = '13px sans-serif'; ctx.fillStyle = 'rgba(255,255,255,0.55)';
+  ctx.fillText('Drag anywhere to move the paddle', W/2, H * 0.66);
+  ctx.fillText('Avoid red glitch orbs · Grab power-ups', W/2, H * 0.71);
+  ctx.fillText('Chain catches for combo fever!', W/2, H * 0.76);
+}
+
+function drawGameOver() {
+  ctx.fillStyle = 'rgba(5,5,15,0.65)';
+  ctx.fillRect(0, 0, W, H);
+  const pulse = (Math.sin(Date.now() * 0.003) + 1) * 0.5;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+  ctx.font = 'bold 42px sans-serif';
+  ctx.fillStyle = '#00ffff';
+  ctx.shadowColor = '#00ffff'; ctx.shadowBlur = 20;
+  ctx.fillText('GAME OVER', W/2, H * 0.32);
+  ctx.shadowBlur = 0;
+  ctx.font = 'bold 28px sans-serif'; ctx.fillStyle = '#ffffff';
+  ctx.fillText(score, W/2, H * 0.42);
+  if (newBest) {
+    ctx.font = 'bold 18px sans-serif';
+    ctx.fillStyle = 'rgba(255,238,0,' + (0.5 + pulse * 0.5) + ')';
+    ctx.fillText('★ NEW BEST! ★', W/2, H * 0.48);
+  } else {
+    ctx.font = '15px sans-serif'; ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.fillText('BEST: ' + best, W/2, H * 0.48);
+  }
+  ctx.font = '14px sans-serif'; ctx.fillStyle = 'rgba(255,255,255,0.5)';
+  ctx.fillText('Max combo: x' + maxCombo, W/2, H * 0.54);
+  ctx.font = 'bold 22px sans-serif';
+  ctx.fillStyle = 'rgba(0,255,255,' + (0.45 + pulse * 0.55) + ')';
+  ctx.fillText('TAP TO PLAY AGAIN', W/2, H * 0.64);
+}
+
+function drawPaused() {
+  ctx.fillStyle = 'rgba(5,5,15,0.6)';
+  ctx.fillRect(0, 0, W, H);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+  ctx.font = 'bold 34px sans-serif'; ctx.fillStyle = '#00ffff';
+  ctx.fillText('PAUSED', W/2, H * 0.45);
+  ctx.font = '16px sans-serif'; ctx.fillStyle = 'rgba(255,255,255,0.6)';
+  ctx.fillText('Tap to resume', W/2, H * 0.53);
+}
+
+function draw() {
+  ctx.fillStyle = bgGrad;
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.fillStyle = '#ffffff';
+  for (const s of bgStars) {
+    ctx.globalAlpha = s.alpha;
+    ctx.fillRect(s.x, s.y, s.r * 2, s.r * 2);
+  }
+  ctx.globalAlpha = 1;
+
+  ctx.save();
+  if (shakeT > 0) {
+    const m = shakeMag * (shakeT / 0.35);
+    ctx.translate((Math.random() * 2 - 1) * m, (Math.random() * 2 - 1) * m);
+  }
+
+  if (gameState === TITLE) {
+    drawTitle();
+    ctx.restore();
+    return;
+  }
+
+  ctx.globalCompositeOperation = 'lighter';
+  for (const o of orbs) {
+    const sp = orbSprite(o.color, o.glitch);
+    const half = SPRITE_HALF * (o.r / SPRITE_R);
+    ctx.drawImage(sp, o.x - half, o.y - half, half * 2, half * 2);
+  }
+  ctx.globalCompositeOperation = 'source-over';
+
+  drawPowerups();
+
+  ctx.globalCompositeOperation = 'lighter';
   for (const p of particles) {
-    ctx.globalAlpha = p.life;
+    ctx.globalAlpha = Math.max(0, p.life);
     ctx.fillStyle = p.color;
-    ctx.shadowColor = p.color; ctx.shadowBlur = 8;
     ctx.beginPath();
     ctx.arc(p.x, p.y, p.r * p.life, 0, Math.PI * 2);
     ctx.fill();
   }
-  ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = 'source-over';
 
-  // HUD
-  ctx.font = 'bold 20px sans-serif';
-  ctx.fillStyle = '#0ff'; ctx.textAlign = 'left';
-  ctx.shadowColor = '#0ff'; ctx.shadowBlur = 10;
-  ctx.fillText('SCORE: ' + score, 16, 36);
-  ctx.shadowBlur = 0;
-  let hearts = '';
-  for (let i = 0; i < lives; i++) hearts += '♥ ';
-  ctx.fillStyle = '#f55'; ctx.textAlign = 'right';
-  ctx.shadowColor = '#f55'; ctx.shadowBlur = 10;
-  ctx.fillText(hearts.trim(), W - 16, 36);
-  ctx.shadowBlur = 0;
-  if (combo > 1) {
-    ctx.font = 'bold 16px sans-serif';
-    ctx.fillStyle = '#f0f'; ctx.textAlign = 'left';
-    ctx.shadowColor = '#f0f'; ctx.shadowBlur = 8;
-    ctx.fillText('COMBO x' + combo, 16, 60);
-    ctx.shadowBlur = 0;
-  }
+  drawPaddle();
+  drawTexts();
+  ctx.restore();
+
+  drawHUD();
+  if (gameState === GAMEOVER) drawGameOver();
+  if (gameState === PAUSED) drawPaused();
 }
 
 function gameLoop(time) {
-  const dt = Math.min((time - lastTime) / 1000, 0.05);
+  const dt = Math.min((time - lastTime) / 1000, 0.033);
   lastTime = time;
   update(dt);
   draw();
   requestAnimationFrame(gameLoop);
 }
 
+// --- Input: single tracked pointer, drag anywhere to move ---
+let activePointer = null;
 canvas.addEventListener('pointerdown', (e) => {
-  canvas.setPointerCapture(e.pointerId);
+  e.preventDefault();
+  initAudio();
+  if (activePointer === null) activePointer = e.pointerId;
+  try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
   if (gameState === PLAYING) {
-    movePaddle(e.clientX);
+    if (e.clientY < safeTop + 40 && Math.abs(e.clientX - W/2) < 44) {
+      gameState = PAUSED;
+      return;
+    }
+    paddle.targetX = e.clientX;
+  } else if (gameState === PAUSED) {
+    gameState = PLAYING;
+  } else if (gameState === GAMEOVER) {
+    if (Date.now() - gameOverAt > 600) startGame();
   } else {
     startGame();
   }
 });
-
 canvas.addEventListener('pointermove', (e) => {
-  if (gameState === PLAYING) movePaddle(e.clientX);
+  if (e.pointerId !== activePointer) return;
+  if (gameState === PLAYING) paddle.targetX = e.clientX;
+});
+function clearPointer(e) {
+  if (e.pointerId === activePointer) activePointer = null;
+}
+canvas.addEventListener('pointerup', clearPointer);
+canvas.addEventListener('pointercancel', clearPointer);
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && gameState === PLAYING) gameState = PAUSED;
+});
+window.addEventListener('blur', () => {
+  if (gameState === PLAYING) gameState = PAUSED;
 });
 
 initStars();
